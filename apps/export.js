@@ -5,14 +5,14 @@ import {
   convertInternalToNative,
   convertInternalToShiguang
 } from "../utils/scheduleFormat.js"
+import {
+  EXPORT_DIR,
+  ensureScheduleDataDirs,
+  hasUserSchedule,
+  loadUserScheduleData
+} from "../utils/scheduleStorage.js"
 
-const DATA_DIR = path.join("./plugins", "classtable", "data")
-const USER_DATA_DIR = path.join(DATA_DIR, "users")
-const EXPORT_DIR = path.join(DATA_DIR, "exports")
-
-for (const dir of [DATA_DIR, USER_DATA_DIR, EXPORT_DIR]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-}
+ensureScheduleDataDirs({ includeExport: true })
 
 function buildExportFileName(userId, format) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-")
@@ -83,13 +83,16 @@ export class classtableExport extends plugin {
 
   async performExport(e, format) {
     try {
-      const userFilePath = path.join(USER_DATA_DIR, `${e.user_id}.json`)
-      if (!fs.existsSync(userFilePath)) {
+      if (!hasUserSchedule(e.user_id)) {
         await e.reply("你还没有导入课表喵")
         return true
       }
 
-      const internalData = JSON.parse(fs.readFileSync(userFilePath, "utf8"))
+      const internalData = loadUserScheduleData(e.user_id, { useCache: false })
+      if (!internalData) {
+        await e.reply("你还没有导入课表喵")
+        return true
+      }
       const exportAsShiguang = format === "shiguang"
       const jsonData = exportAsShiguang
         ? convertInternalToShiguang(internalData)

@@ -1,8 +1,10 @@
-import fs from "node:fs"
-import path from "node:path"
 import plugin from "../../../lib/plugins/plugin.js"
-
-const USER_DATA_DIR = path.join("./plugins", "classtable", "data", "users")
+import {
+  hasUserSchedule,
+  loadUserScheduleData,
+  normalizeScheduleData,
+  calculateWeekByStartDate
+} from "../utils/scheduleStorage.js"
 
 export class classtableQuery extends plugin {
   constructor() {
@@ -83,9 +85,8 @@ export class classtableQuery extends plugin {
   async renderDateSchedule(e, targetDate, dateStr) {
     try {
       const userId = e.user_id
-      const filePath = path.join(USER_DATA_DIR, `${userId}.json`)
       
-      if (!fs.existsSync(filePath)) {
+      if (!hasUserSchedule(userId)) {
         await e.reply("你还没有导入课表哦，请先使用WakeUp课程表分享口令导入~")
         return
       }
@@ -95,19 +96,20 @@ export class classtableQuery extends plugin {
         return
       }
 
-      // 读取课表数据
-      const scheduleData = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-      const schedule = scheduleData.schedule || scheduleData
-      const startDate = new Date(scheduleData.startDate || "2025-09-01")
+      const scheduleData = loadUserScheduleData(userId, { useCache: true })
+      if (!scheduleData) {
+        await e.reply("你还没有导入课表哦，请先使用WakeUp课程表分享口令导入~")
+        return
+      }
+      const { schedule, startDate, maxWeek } = normalizeScheduleData(scheduleData)
 
       // 计算周次和星期
       const dayOfWeek = targetDate.getDay() === 0 ? 7 : targetDate.getDay()
-      const diffDays = Math.floor((targetDate - startDate) / (1000 * 60 * 60 * 24))
-      const week = Math.floor(diffDays / 7) + 1
+      const week = calculateWeekByStartDate(targetDate, startDate)
 
       // 检查日期有效性
-      if (week < 1 || week > (scheduleData.maxWeek || 20)) {
-        await e.reply(`${dateStr} 不在本学期范围内（第1-${scheduleData.maxWeek || 20}周）`)
+      if (week < 1 || week > maxWeek) {
+        await e.reply(`${dateStr} 不在本学期范围内（第1-${maxWeek}周）`)
         return
       }
 

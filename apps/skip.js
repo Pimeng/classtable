@@ -1,14 +1,14 @@
-import fs from "node:fs"
-import path from "node:path"
 import plugin from "../../../lib/plugins/plugin.js"
 import {
-  userScheduleCache,
-  getUserScheduleCacheKey,
   getSkipClassCacheKey
 } from "../utils/cache.js"
 import { isInClassTime, findConsecutiveClasses, parseTimeString } from "../utils/time.js"
-
-const USER_DATA_DIR = path.join("./plugins", "classtable", "data", "users")
+import {
+  hasUserSchedule,
+  loadUserScheduleData,
+  normalizeScheduleData,
+  calculateWeekByStartDate
+} from "../utils/scheduleStorage.js"
 
 export class classtableSkip extends plugin {
   constructor() {
@@ -47,21 +47,17 @@ export class classtableSkip extends plugin {
       const userId = e.user_id
 
       // 获取用户当前课程信息
-      const filePath = path.join(USER_DATA_DIR, `${userId}.json`)
-      if (!fs.existsSync(filePath)) {
+      if (!hasUserSchedule(userId)) {
         await e.reply("你还没有导入课表，不知道你要翘什么课哦")
         return
       }
 
-      const cacheKey = getUserScheduleCacheKey(userId)
-      let scheduleData = userScheduleCache.get(cacheKey)
-
+      const scheduleData = loadUserScheduleData(userId, { useCache: true })
       if (!scheduleData) {
-        scheduleData = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-        userScheduleCache.set(cacheKey, scheduleData)
+        await e.reply("你还没有导入课表，不知道你要翘什么课哦")
+        return
       }
-
-      const schedule = scheduleData.schedule || scheduleData
+      const { schedule, startDate } = normalizeScheduleData(scheduleData)
 
       // 获取当前时间
       const currentTime = new Date()
@@ -70,8 +66,7 @@ export class classtableSkip extends plugin {
       const currentMinute = currentTime.getMinutes()
 
       // 获取当前周次
-      const userStartDate = scheduleData.startDate || "2025-09-01"
-      const currentWeek = Math.floor((currentTime - new Date(userStartDate)) / (1000 * 60 * 60 * 24 * 7)) + 1
+      const currentWeek = calculateWeekByStartDate(currentTime, startDate)
 
       // 查找当前课程或下一节课（最近1小时内有课程）
       let currentClass = null

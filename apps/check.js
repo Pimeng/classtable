@@ -1,16 +1,14 @@
-import fs from "node:fs"
-import path from "node:path"
 import plugin from "../../../lib/plugins/plugin.js"
-import {
-  userScheduleCache,
-  getUserScheduleCacheKey,
-  getSkipClassCacheKey
-} from "../utils/cache.js"
+import { getSkipClassCacheKey } from "../utils/cache.js"
 import { findNextClass } from "../utils/renderNextClass.js"
 import { parseTimeString } from "../utils/time.js"
 import config from "../utils/config.js"
-
-const USER_DATA_DIR = path.join("./plugins", "classtable", "data", "users")
+import {
+  hasUserSchedule,
+  loadUserScheduleData,
+  normalizeScheduleData,
+  calculateWeekByStartDate
+} from "../utils/scheduleStorage.js"
 
 export class classtableCheck extends plugin {
   constructor() {
@@ -54,26 +52,17 @@ export class classtableCheck extends plugin {
    */
   async checkUserInClassAndReply(e, userId) {
     try {
-      const filePath = path.join(USER_DATA_DIR, `${userId}.json`)
-      if (!fs.existsSync(filePath)) {
-        return
-      }
+      if (!hasUserSchedule(userId)) return
 
       const currentTime = new Date()
       const currentDay = currentTime.getDay() === 0 ? 7 : currentTime.getDay()
       const currentHour = currentTime.getHours()
       const currentMinute = currentTime.getMinutes()
 
-      // 使用缓存获取用户课表数据
-      const cacheKey = getUserScheduleCacheKey(userId)
-      let scheduleData = userScheduleCache.get(cacheKey)
-      if (!scheduleData) {
-        scheduleData = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-        userScheduleCache.set(cacheKey, scheduleData)
-      }
-      const schedule = scheduleData.schedule || scheduleData
-      const userStartDate = scheduleData.startDate || "2025-09-01"
-      const currentWeek = Math.floor((currentTime - new Date(userStartDate)) / (1000 * 60 * 60 * 24 * 7)) + 1
+      const scheduleData = loadUserScheduleData(userId, { useCache: true })
+      if (!scheduleData) return
+      const { schedule, startDate } = normalizeScheduleData(scheduleData)
+      const currentWeek = calculateWeekByStartDate(currentTime, startDate)
 
       // 查找当前正在上的课程
       const nextClassInfo = findNextClass(schedule, currentWeek, currentDay, currentHour, currentMinute)

@@ -1,6 +1,4 @@
-﻿import fs from "node:fs"
-import path from "node:path"
-import {
+﻿import {
   parseTimeString,
   isInClassTime,
   findConsecutiveClasses,
@@ -12,31 +10,16 @@ import {
   getGroupCacheKey,
   getSkipClassCacheKey
 } from './cache.js'
-
-const DATA_DIR = path.join("./plugins", "classtable", "data")
-const USER_DATA_DIR = path.join(DATA_DIR, "users")
-const GROUP_DATA_DIR = path.join(DATA_DIR, "groups")
+import {
+  listUsersWithScheduleFromFiles as listUserIdsWithScheduleFromStorage,
+  syncGroupUserListWithMembers as syncGroupUsersFromStorage,
+  getGroupUserIds as readGroupUserIdsFromStorage,
+  loadUserScheduleData,
+  normalizeScheduleData,
+  calculateWeekByStartDate as calcWeekByStartDate
+} from "./scheduleStorage.js"
 
 // 内部函数 Start
-
-/**
-* 获取课表文件路径
- * @param {string} userId - 用户ID
- * @returns {string} 文件路径 
- */
-function getSchedulePath(userId) {
-  return path.join(USER_DATA_DIR, `${userId}.json`)
-}
-
-/**
- * 从文件加载课表数据
- * @param {string} filePath - 文件路径
- * @returns {Object} 课表数据
- */
-function loadScheduleFromFile(filePath) {
-  const content = fs.readFileSync(filePath, 'utf8')
-  return JSON.parse(content)
-}
 
 /**
  * 计算当前周次
@@ -45,8 +28,7 @@ function loadScheduleFromFile(filePath) {
  * @returns {number} 当前周次
  */
 function calculateCurrentWeek(startDate, currentDate) {
-  const deltaDays = Math.floor((currentDate - startDate) / (1000 * 60 * 60 * 24))
-  const week = Math.floor(deltaDays / 7) + 1
+  const week = calcWeekByStartDate(currentDate, startDate)
   return week < 1 ? 1 : week
 }
 
@@ -55,33 +37,9 @@ function calculateCurrentWeek(startDate, currentDate) {
  * @returns {Array} 用户ID数组
  */
 function getAllUsersWithScheduleFromFiles() {
-  try {
-    // 直接从用户数据目录中读取所有用户文件
-    const userIds = []
-    
-    // 确保用户数据目录存在
-    if (!fs.existsSync(USER_DATA_DIR)) {
-      logger.info(`[ClassTable] 用户数据目录不存在: ${USER_DATA_DIR}`)
-      return []
-    }
-    
-    // 读取目录中的所有文件
-    const files = fs.readdirSync(USER_DATA_DIR)
-    
-    // 过滤出.json文件并提取用户ID
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const userId = file.replace('.json', '')
-        userIds.push(userId)
-      }
-    }
-    
-    logger.info(`[ClassTable] 从文件中找到${userIds.length}个有课表数据的用户`)
-    return userIds
-  } catch (error) {
-    logger.error(`[ClassTable] 获取所有用户列表失败: ${error}`)
-    return []
-  }
+  const userIds = listUserIdsWithScheduleFromStorage()
+  logger.info(`[ClassTable] 从文件中找到${userIds.length}个有课表数据的用户`)
+  return userIds
 }
 
 /**
@@ -91,29 +49,7 @@ function getAllUsersWithScheduleFromFiles() {
  * @returns {Array} 有课表数据的群成员 QQ 号数组
  */
 async function syncGroupUserListWithMembers(groupId, memberInfo) {
-  try {
-    // 获取所有群成员 QQ 号
-    const memberIds = Array.from(memberInfo.keys()).map(String)
-    // 过滤出有课表数据的成员
-    const validUserIds = memberIds.filter(userId => {
-      const userFilePath = path.join(USER_DATA_DIR, `${userId}.json`)
-      return fs.existsSync(userFilePath)
-    })
-    // 群组用户列表文件路径
-    const groupUserListPath = path.join(GROUP_DATA_DIR, `${groupId}_userlist.json`)
-    let oldUserIds = []
-    if (fs.existsSync(groupUserListPath)) {
-      try {
-        oldUserIds = JSON.parse(fs.readFileSync(groupUserListPath, 'utf8'))
-      } catch (e) {}
-    }
-    // 只保留当前群成员且有课表的用户并写回文件（去重）
-    fs.writeFileSync(groupUserListPath, JSON.stringify(validUserIds, null, 2), 'utf8')
-    return validUserIds
-  } catch (error) {
-    logger.error(`[ClassTable] 同步群组用户列表失败: ${error}`)
-    return []
-  }
+  return syncGroupUsersFromStorage(groupId, memberInfo)
 }
 
 // 兼容原有接口，自动同步群成员与课表用户
@@ -123,23 +59,7 @@ async function getAllUsersWithSchedule(groupId, memberInfo = null) {
     if (memberInfo) {
       return await syncGroupUserListWithMembers(groupId, memberInfo)
     }
-    // 否则走原有逻辑
-    const groupUserListPath = path.join(GROUP_DATA_DIR, `${groupId}_userlist.json`)
-    if (!fs.existsSync(groupUserListPath)) {
-      logger.info(`[ClassTable] 群组${groupId}的用户列表文件不存在`)
-      return []
-    }
-    const content = fs.readFileSync(groupUserListPath, 'utf8')
-    const userIds = JSON.parse(content)
-    // 过滤出实际存在课表文件的用户
-    const validUserIds = []
-    for (const userId of userIds) {
-      const userFilePath = path.join(USER_DATA_DIR, `${userId}.json`)
-      if (fs.existsSync(userFilePath)) {
-        validUserIds.push(userId)
-      }
-    }
-    return validUserIds
+    return readGroupUserIdsFromStorage(groupId)
   } catch (error) {
     logger.error(`[ClassTable] 获取群组用户列表失败: ${error}`)
     return []
@@ -209,79 +129,18 @@ async function getMultipleNextClassRenderData(e, limit = null) {
         userName = `用户${userId}`
       }
       
-      const filePath = getSchedulePath(userId)
-      if (!fs.existsSync(filePath)) {
-        return {
-          userName: userName,
-          avatar: avatarUrl,
-          hasClass: false,
-          NoCourseTitle: "未导入课表",
-          NoCourseTip: "该用户尚未导入课表"
-        }
-      }
-      
       try {
-        const scheduleData = loadScheduleFromFile(filePath)
-        const schedule = scheduleData.schedule || scheduleData // 兼容新旧数据格式
-        
-        // 获取该用户的开学日期，如果没有则使用默认值
-        const userStartDate = scheduleData.startDate || "2025-09-01"
-        const currentWeek = calculateCurrentWeek(new Date(userStartDate), currentTime)
-        
-        const nextClassInfo = findNextClass(schedule, currentWeek, currentDay, currentHour, currentMinute)
-
-        if (!nextClassInfo || nextClassInfo.status === 'noneToday') {
-          return {
-            userName: (userName || "").length > 12 ? (userName.substring(0, 12) + "...") : userName,
-            avatar: avatarUrl,
-            hasClass: false,
-            type: "空闲",
-            typeColor: "#50ff05ff",
-            NoCourseTitle: "今日无课",
-            NoCourseTip: "好好休息一下吧"
-          }
-        } else {
-          let nowType = "将开始"
-          let typeColor = "#ffb700ff"
-          if (nextClassInfo.status === 'ongoing') {
-            nowType = "上课中"
-            typeColor = "#00eeffff"
-          }
-
-          // 检查用户是否翘课
-          const skipKey = getSkipClassCacheKey(userId)
-          let isSkippingClass = false
-          try {
-            isSkippingClass = !!(await redis.get(skipKey))
-          } catch (error) {
-            logger.error(`[ClassTable] 检查翘课状态失败: ${error}`)
-          }
-
-          // 如果用户翘课且课程状态为'ongoing'或'next'，则显示翘课状态
-          if (isSkippingClass && (nextClassInfo.status === 'ongoing' || nextClassInfo.status === 'next')) {
-            nowType = "翘课中"
-            typeColor = "#ff4757ff"
-          }
-
-          // 计算距离课程结束的时间（分钟）
-          let timeUntilEnd = null
-          if (nextClassInfo.status === 'ongoing') {
-            const currentTimeStr = `${currentHour}:${currentMinute}`
-            timeUntilEnd = calculateTimeInterval(currentTimeStr, nextClassInfo.endTime)
-          }
-
-          return {
-            userName: (userName || "").length > 12 ? (userName.substring(0, 12) + "...") : userName,
-            avatar: avatarUrl,
-            hasClass: true,
-            className: (nextClassInfo.courseName || "").length > 8 ? (nextClassInfo.courseName.substring(0, 8) + "...") : nextClassInfo.courseName,
-            type: nowType,
-            typeColor: typeColor,
-            startTime: nextClassInfo.startTime,
-            endTime: nextClassInfo.endTime,
-            timeUntilEnd: timeUntilEnd
-          }
-        }
+        return await buildUserNextClassCard({
+          userId,
+          userName,
+          avatarUrl,
+          currentTime,
+          currentDay,
+          currentHour,
+          currentMinute,
+          noClassTitle: "今日无课",
+          noClassTip: "好好休息一下吧"
+        })
       } catch (error) {
         logger.error(`[ClassTable] 获取用户${userId}的课表数据失败: ${error}`)
         return {
@@ -297,51 +156,8 @@ async function getMultipleNextClassRenderData(e, limit = null) {
     const userResults = await Promise.all(userPromises)
     userList.push(...userResults.filter(item => item !== undefined))
     
-    // 对用户列表进行排序：先按状态排序，再按上课时间排序
-    userList.sort((a, b) => {
-      // 定义状态优先级
-      const statusPriority = {
-        '上课中': 1,
-        '翘课中': 2,
-        '将开始': 3,
-        '空闲': 4
-      }
-      
-      // 获取两个用户的状态
-      const statusA = a.hasClass ? a.type : '空闲'
-      const statusB = b.hasClass ? b.type : '空闲'
-      
-      // 按照优先级排序
-      const priorityA = statusPriority[statusA] || 999
-      const priorityB = statusPriority[statusB] || 999
-      
-      // 如果状态不同，按状态排序
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB
-      }
-      
-      // 如果状态相同，按上课时间排序
-      // 只有有课的用户才有时间信息
-      if (a.hasClass && b.hasClass && a.startTime && b.startTime) {
-        try {
-          // 将时间字符串转换为分钟数进行比较
-          const totalMinutesA = timeToMinutes(a.startTime)
-          const totalMinutesB = timeToMinutes(b.startTime)
-          
-          if (totalMinutesA !== totalMinutesB) {
-            return totalMinutesA - totalMinutesB
-          }
-        } catch (error) {
-          logger.warn(`[ClassTable] 时间格式解析失败: A=${a.startTime}, B=${b.startTime}`)
-          // 如果时间解析失败，继续按用户名排序
-        }
-      }
-      
-      // 如果状态相同且无法按时间排序，按用户名排序确保稳定性
-      const nameA = a.userName || ''
-      const nameB = b.userName || ''
-      return nameA.localeCompare(nameB)
-    })
+    // 对用户列表进行排序：先按状态，再按上课时间，最后按用户名兜底
+    userList.sort((a, b) => compareUsersByStatusAndTime(a, b, { fallback: "name", logTimeParseError: true }))
     
     // 缓存结果5分钟
     groupQueryCache.set(cacheKey, userList, 5 * 60 * 1000)
@@ -408,69 +224,18 @@ async function getAllUsersNextClassRenderData(e, limit = null) {
       let userName = `id${userId}`
       let avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=100`
       
-      const filePath = getSchedulePath(userId)
       try {
-        const scheduleData = loadScheduleFromFile(filePath)
-        const schedule = scheduleData.schedule || scheduleData // 兼容新旧数据格式
-        
-        // 获取该用户的开学日期，如果没有则使用默认值
-        const userStartDate = scheduleData.startDate || "2025-09-01"
-        const currentWeek = calculateCurrentWeek(new Date(userStartDate), currentTime)
-        
-        const nextClassInfo = findNextClass(schedule, currentWeek, currentDay, currentHour, currentMinute)
-
-        if (!nextClassInfo || nextClassInfo.status === 'noneToday') {
-          return {
-            userName: (userName || "").length > 12 ? (userName.substring(0, 12) + "...") : userName,
-            avatar: avatarUrl,
-            hasClass: false,
-            type: "空闲",
-            typeColor: "#50ff05ff",
-            NoCourseTitle: "好耶！没课喵",
-            NoCourseTip: "休息吧喵"
-          }
-        } else {
-          let nowType = "将开始"
-          let typeColor = "#ffb700ff"
-          if (nextClassInfo.status === 'ongoing') {
-            nowType = "上课中"
-            typeColor = "#00eeffff"
-          }
-
-          // 检查用户是否翘课
-          const skipKey = getSkipClassCacheKey(userId)
-          let isSkippingClass = false
-          try {
-            isSkippingClass = !!(await redis.get(skipKey))
-          } catch (error) {
-            logger.error(`[ClassTable] 检查翘课状态失败: ${error}`)
-          }
-
-          // 如果用户翘课且课程状态为'ongoing'或'next'，则显示翘课状态
-          if (isSkippingClass && (nextClassInfo.status === 'ongoing' || nextClassInfo.status === 'next')) {
-            nowType = "翘课中"
-            typeColor = "#ff4757ff"
-          }
-
-          // 计算距离课程结束的时间（分钟）
-          let timeUntilEnd = null
-          if (nextClassInfo.status === 'ongoing') {
-            const currentTimeStr = `${currentHour}:${currentMinute}`
-            timeUntilEnd = calculateTimeInterval(currentTimeStr, nextClassInfo.endTime)
-          }
-
-          return {
-            userName: (userName || "").length > 12 ? (userName.substring(0, 12) + "...") : userName,
-            avatar: avatarUrl,
-            hasClass: true,
-            className: (nextClassInfo.courseName || "").length > 8 ? (nextClassInfo.courseName.substring(0, 8) + "...") : nextClassInfo.courseName,
-            type: nowType,
-            typeColor: typeColor,
-            startTime: nextClassInfo.startTime,
-            endTime: nextClassInfo.endTime,
-            timeUntilEnd: timeUntilEnd
-          }
-        }
+        return await buildUserNextClassCard({
+          userId,
+          userName,
+          avatarUrl,
+          currentTime,
+          currentDay,
+          currentHour,
+          currentMinute,
+          noClassTitle: "好耶！没课喵",
+          noClassTip: "休息吧喵"
+        })
       } catch (error) {
         logger.error(`[ClassTable] 获取用户${userId}的课表数据失败: ${error}`)
         return {
@@ -486,42 +251,8 @@ async function getAllUsersNextClassRenderData(e, limit = null) {
     const userResults = await Promise.all(userPromises)
     userList.push(...userResults.filter(item => item !== undefined))
     
-    // 对用户列表进行排序：先按状态排序，再按上课时间排序
-    userList.sort((a, b) => {
-      // 定义状态优先级
-      const statusPriority = {
-        '上课中': 1,
-        '翘课中': 2,
-        '将开始': 3,
-        '空闲': 4
-      }
-      
-      // 获取两个用户的状态
-      const statusA = a.hasClass ? a.type : '空闲'
-      const statusB = b.hasClass ? b.type : '空闲'
-      
-      // 按照优先级排序
-      const priorityA = statusPriority[statusA] || 999
-      const priorityB = statusPriority[statusB] || 999
-      
-      // 如果状态不同，按状态排序
-      if (priorityA !== priorityB) {
-        return priorityA - priorityB
-      }
-      
-      // 如果状态相同，按上课时间排序
-      // 只有有课的用户才有时间信息
-      if (a.hasClass && b.hasClass && a.startTime && b.startTime) {
-        // 将时间字符串转换为分钟数进行比较
-        const totalMinutesA = timeToMinutes(a.startTime)
-        const totalMinutesB = timeToMinutes(b.startTime)
-        
-        return totalMinutesA - totalMinutesB
-      }
-      
-      // 如果状态相同但无法按时间排序，保持原顺序
-      return 0
-    })
+    // 对用户列表进行排序：先按状态，再按上课时间，最后保持原顺序
+    userList.sort((a, b) => compareUsersByStatusAndTime(a, b, { fallback: "none", logTimeParseError: false }))
     
     // 如果指定了限制数量，只返回前N个用户
     if (limit && limit > 0 && userList.length > limit) {
@@ -637,3 +368,125 @@ export {
   getAllUsersNextClassRenderData,
   findNextClass
 }
+
+const STATUS_PRIORITY = {
+  "上课中": 1,
+  "翘课中": 2,
+  "将开始": 3,
+  "空闲": 4
+}
+
+function compareUsersByStatusAndTime(a, b, { fallback = "none", logTimeParseError = false } = {}) {
+  const statusA = a.hasClass ? a.type : "空闲"
+  const statusB = b.hasClass ? b.type : "空闲"
+
+  const priorityA = STATUS_PRIORITY[statusA] || 999
+  const priorityB = STATUS_PRIORITY[statusB] || 999
+  if (priorityA !== priorityB) {
+    return priorityA - priorityB
+  }
+
+  if (a.hasClass && b.hasClass && a.startTime && b.startTime) {
+    try {
+      const totalMinutesA = timeToMinutes(a.startTime)
+      const totalMinutesB = timeToMinutes(b.startTime)
+      if (totalMinutesA !== totalMinutesB) {
+        return totalMinutesA - totalMinutesB
+      }
+    } catch (error) {
+      if (logTimeParseError) {
+        logger.warn(`[ClassTable] 时间格式解析失败: A=${a.startTime}, B=${b.startTime}`)
+      }
+    }
+  }
+
+  if (fallback === "name") {
+    const nameA = a.userName || ""
+    const nameB = b.userName || ""
+    return nameA.localeCompare(nameB)
+  }
+  return 0
+}
+
+function trimDisplayName(text, maxLen) {
+  const name = String(text || "")
+  return name.length > maxLen ? `${name.substring(0, maxLen)}...` : name
+}
+
+async function buildUserNextClassCard({
+  userId,
+  userName,
+  avatarUrl,
+  currentTime,
+  currentDay,
+  currentHour,
+  currentMinute,
+  noClassTitle,
+  noClassTip
+}) {
+  const scheduleData = loadUserScheduleData(userId, { useCache: true })
+  if (!scheduleData) {
+    return {
+      userName,
+      avatar: avatarUrl,
+      hasClass: false,
+      NoCourseTitle: "未导入课表",
+      NoCourseTip: "该用户尚未导入课表"
+    }
+  }
+
+  const { schedule, startDate: userStartDate } = normalizeScheduleData(scheduleData)
+  const currentWeek = calculateCurrentWeek(new Date(userStartDate), currentTime)
+  const nextClassInfo = findNextClass(schedule, currentWeek, currentDay, currentHour, currentMinute)
+
+  if (!nextClassInfo || nextClassInfo.status === "noneToday") {
+    return {
+      userName: trimDisplayName(userName, 12),
+      avatar: avatarUrl,
+      hasClass: false,
+      type: "空闲",
+      typeColor: "#50ff05ff",
+      NoCourseTitle: noClassTitle,
+      NoCourseTip: noClassTip
+    }
+  }
+
+  let nowType = "将开始"
+  let typeColor = "#ffb700ff"
+  if (nextClassInfo.status === "ongoing") {
+    nowType = "上课中"
+    typeColor = "#00eeffff"
+  }
+
+  const skipKey = getSkipClassCacheKey(userId)
+  let isSkippingClass = false
+  try {
+    isSkippingClass = !!(await redis.get(skipKey))
+  } catch (error) {
+    logger.error(`[ClassTable] 检查翘课状态失败: ${error}`)
+  }
+
+  if (isSkippingClass && (nextClassInfo.status === "ongoing" || nextClassInfo.status === "next")) {
+    nowType = "翘课中"
+    typeColor = "#ff4757ff"
+  }
+
+  let timeUntilEnd = null
+  if (nextClassInfo.status === "ongoing") {
+    const currentTimeStr = `${currentHour}:${currentMinute}`
+    timeUntilEnd = calculateTimeInterval(currentTimeStr, nextClassInfo.endTime)
+  }
+
+  return {
+    userName: trimDisplayName(userName, 12),
+    avatar: avatarUrl,
+    hasClass: true,
+    className: trimDisplayName(nextClassInfo.courseName, 8),
+    type: nowType,
+    typeColor,
+    startTime: nextClassInfo.startTime,
+    endTime: nextClassInfo.endTime,
+    timeUntilEnd
+  }
+}
+
