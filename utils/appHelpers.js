@@ -69,7 +69,7 @@ export async function postJson(url, data, timeout = 5000) {
 }
 
 export async function getBotName(e, fallback = null) {
-  return Bot[e.self_id || Bot.uin]?.nickname || Bot.nickname || fallback || null
+  return config.BOT_NAME || Bot[e.self_id || Bot.uin]?.nickname || Bot.nickname || fallback || null
 }
 
 /**

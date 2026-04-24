@@ -10,7 +10,7 @@ APITOKEN: 不告诉你喵
 AT_REMIND: false
 
 # Bot 名字，如果不填则使用 Bot 的 QQ 名字
-BOT_NAME:
+BOT_NAME: Yunzai
 
 # 更新镜像前缀（留空则默认 https://ghproxy.net/）
 UPDATE_MIRROR_URL: https://ghproxy.net/
