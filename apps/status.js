@@ -3,7 +3,7 @@ import {
   getMultipleNextClassRenderData,
   getAllUsersNextClassRenderData
 } from "../utils/renderNextClass.js"
-import { renderImg } from "./utils.js"
+import { renderImg } from "../utils/appHelpers.js"
 
 export class classtableStatus extends plugin {
   constructor() {

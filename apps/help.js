@@ -1,6 +1,6 @@
 import plugin from "../../../lib/plugins/plugin.js"
 import common from "../../../lib/common/common.js"
-import { getBotName } from "./utils.js"
+import { getBotName } from "../utils/appHelpers.js"
 
 export class classtableHelp extends plugin {
   constructor() {

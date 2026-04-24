@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import plugin from "../../../lib/plugins/plugin.js"
-import { postJson } from "./utils.js"
+import { postJson, safeRecallEventMsg } from "../utils/appHelpers.js"
 import config from "../utils/config.js"
 import {
   convertNativeToInternal,
@@ -45,7 +45,7 @@ export class classtableImport extends plugin {
 
   async prepareJsonImport(e) {
     this.setContext("importScheduleFile", e.isGroup)
-    await e.reply("请发送 JSON 课表文件，我会自动识别插件标准格式或拾光格式")
+    await e.reply("请发送 JSON 课表文件，Bot会自动识别插件标准格式或拾光格式")
   }
 
   async receiveScheduleFile(e) {
@@ -96,7 +96,7 @@ export class classtableImport extends plugin {
 
       await e.reply(`导入课程表成功，已识别为${importedFrom}。重复导入会覆盖之前的数据。`)
       if (e.isGroup) {
-        await e.reply("已收到文件，如有需要请手动撤回。", false, { at: true })
+        await e.reply("已收到文件，如有需要请手动撤回", false, { at: true })
       }
       return true
     } catch (error) {
@@ -107,12 +107,12 @@ export class classtableImport extends plugin {
   }
 
   async importWakeUpSchedule(e) {
-    await e.recall()
+    const recallSuccess = await safeRecallEventMsg(e, { maxAgeSeconds: 110 })
 
     try {
       const match = e.msg.match(WAKEUP_SHARE_REG)
       if (!match) {
-        await e.reply("无法识别分享口令，请确认发送的是完整的 WakeUp 分享消息。")
+        await e.reply("看不懂分享口令是什么呢，请检查你的分享口令是否完整qwq")
         return true
       }
 
@@ -120,18 +120,23 @@ export class classtableImport extends plugin {
       const jsonData = await this.getCourseScheduleFromApi(shareCode)
       if (!jsonData || jsonData.status !== 1 || jsonData.message !== "success" || !jsonData.data) {
         logger.warn(`[ClassTable] 导入课程表失败: ${JSON.stringify(jsonData)}`)
-        await e.reply(`尝试导入课程表失败，请检查分享口令是否正确或是否已过期。\n\n错误返回值: ${JSON.stringify(jsonData)}`)
+        await e.reply(`好像出问题了qwq\n错误: ${JSON.stringify(jsonData)}`)
         return true
       }
 
       const courseSchedule = this.generateCourseScheduleFromData(jsonData)
       this.saveUserSchedule(e.user_id, e.isGroup ? e.group_id : null, courseSchedule)
 
-      await e.reply("导入课程表成功，重复导入会覆盖之前的数据。Bot 正在尝试撤回你的口令，如果撤回失败请手动撤回。")
+      const importSuccessMsg = !e.isGroup
+        ? "导入课程表成功，重复导入会覆盖之前的数据。"
+        : recallSuccess
+          ? "导入课程表成功，重复导入会覆盖之前的数据。\n为了隐私安全，已自动撤回你的分享口令。"
+          : "导入课程表成功，重复导入会覆盖之前的数据。\n注意：Bot没有权限撤回你的分享口令消息，请手动撤回嗷"
+      await e.reply(importSuccessMsg)
       return true
     } catch (error) {
       logger.error(`[ClassTable] WakeUp 导入课程表失败: ${error.stack || error}`)
-      await e.reply("课程表导入失败，可能是接口异常或分享口令已失效。")
+      await e.reply("课程表导入失败了qwq\n检查一下分享口令是否正确呢喵")
       return true
     }
   }
