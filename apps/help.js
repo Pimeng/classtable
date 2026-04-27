@@ -52,7 +52,7 @@ export class classtableHelp extends plugin {
     msg.push([
       "翘课功能：",
       "- `什么水课，翘了！` 或 `#clsskip`",
-      "- `哈不翘了还是` 或 `#clscancel`"
+      "- `哎不翘了还是` 或 `#clscancel`"
     ].join("\n"))
 
     const forwardMsg = await common.makeForwardMsg(e, msg, "课程表插件使用帮助")
