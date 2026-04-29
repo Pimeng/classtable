@@ -36,6 +36,8 @@ git clone --depth=1 https://github.com/Pimeng/classtable.git ./plugin/classtable
 
 > [!CAUTION]
 > 傻逼 Wakeup 课程表，你很有意思吗？为了这一点的恶趣味，不断地加强分享口令接口的校验，让大家都没法正常用，你觉得你很会搞是吗？
+> 
+> 为了不让别人用你的分享口令导入到其他的工具，你还做了这种东西，你觉得非你不可了，就他妈加这么多广告，一点天天弹窗要我强制更新，不更新就不给我用，你是全家死光光了吗？
 
 - 拾光课程表：https://github.com/XingHeYuZhuan/shiguangschedule
 
