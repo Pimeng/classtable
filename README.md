@@ -7,12 +7,12 @@ Miao-Yunzai 机器人课程表插件，支持 WakeUp 课程表导入。
 方法1. Git安装
 
 ```bash
-git clone --depth=1 https://github.com/Pimeng/classtable.git ./plugin/classtable
+git clone --depth=1 https://github.com/Pimeng/classtable.git ./plugins/classtable
 ```
 
 > 或者使用镜像
 > ```bash
-> git clone --depth=1 https://ghproxy.net/https://github.com/Pimeng/classtable.git ./plugin/classtable
+> git clone --depth=1 https://ghproxy.net/https://github.com/Pimeng/classtable.git ./plugins/classtable
 > ```
 
 克隆完毕后重启 Yunzai 就可以使用了
