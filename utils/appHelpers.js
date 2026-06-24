@@ -38,6 +38,37 @@ export async function renderImg(pluginName, tplName, data, e) {
 }
 
 /**
+ * 发送 JSON GET 请求
+ * @param {string} url 请求地址
+ * @param {Record<string, string>} headers 请求头
+ * @param {number} timeout 超时时间(ms)
+ * @returns {Promise<any>}
+ */
+export async function getJson(url, headers = {}, timeout = 5000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        ...headers
+      },
+      signal: controller.signal
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    return await response.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * 发送 JSON POST 请求
  * @param {string} url 请求地址
  * @param {object} data 请求体

@@ -1,5 +1,5 @@
 import plugin from "../../../lib/plugins/plugin.js"
-import { postJson, safeRecallEventMsg } from "../utils/appHelpers.js"
+import { getJson, safeRecallEventMsg } from "../utils/appHelpers.js"
 import config from "../utils/config.js"
 import {
   convertNativeToInternal,
@@ -186,27 +186,26 @@ export class classtableImport extends plugin {
   }
 
   async getCourseScheduleFromApi(shareCode) {
-    const url = config.WAKEUP_URL
+    const baseUrl = String(config.WAKEUP_URL || "").replace(/\/+$/, "")
     const token = config.APITOKEN
 
-    if (!url || !token) {
+    if (!baseUrl || !token) {
       throw new Error("classtable 配置缺少 WAKEUP_URL 或 APITOKEN")
     }
 
-    const responseData = await postJson(url, {
-      shareToken: shareCode,
-      apiToken: token || null
+    const url = `${baseUrl}/share?shareCode=${encodeURIComponent(shareCode)}`
+    const responseData = await getJson(url, {
+      "X-Auth-Token": token
     }, 5000)
 
-    if (!responseData || responseData.code !== 0 || responseData.message !== "success" || !responseData.data) {
+    if (!responseData || responseData.success !== true || responseData.code !== 200 || responseData.message !== "获取成功" || !responseData.data?.shareData) {
       return responseData
     }
 
-    const decodedData = Buffer.from(responseData.data, "base64").toString("utf8")
     return {
-      ...responseData,
       status: 1,
-      data: decodedData
+      message: "success",
+      data: responseData.data.shareData
     }
   }
 

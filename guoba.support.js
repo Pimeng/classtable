@@ -41,24 +41,24 @@ export function supportGuoba() {
       schemas: [
         {
           component: "SOFT_GROUP_BEGIN",
-          label: "课表请求API"
+          label: "WakeUp 分享口令 API"
         },
         {
           field: "WAKEUP_URL",
-          label: "WakeUp API 地址",
-          bottomHelpMessage: "用于导入课表的后端接口地址",
+          label: "WakeUp API 基础地址",
+          bottomHelpMessage: "只需填写基础地址，插件会自动拼接 /share?shareCode=xxx",
           component: "Input",
           componentProps: {
-            placeholder: "例如: https://example.com/wakeup"
+            placeholder: "例如: https://wakeup.api.pmnet.work"
           }
         },
         {
           field: "APITOKEN",
-          label: "WakeUp API Token",
-          bottomHelpMessage: "导入课表时请求接口所需 Token",
+          label: "X-Auth-Token",
+          bottomHelpMessage: "导入课表时通过请求头 X-Auth-Token 鉴权",
           component: "Input",
           componentProps: {
-            placeholder: "请输入 APITOKEN"
+            placeholder: "请输入 X-Auth-Token"
           }
         },
         {
