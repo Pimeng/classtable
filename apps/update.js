@@ -28,7 +28,7 @@ export class classtableUpdate extends plugin {
 
   async updatePlugin(e) {
     if (!e.isMaster) {
-      await e.reply("暂无权限，只有主人才能操作")
+      await e.reply("暂无权限，只有主人才能操作喵")
       return true
     }
 
