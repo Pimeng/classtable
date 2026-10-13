@@ -125,6 +125,10 @@ function normalizeCourseEntries(rawCourses) {
 export function buildInternalScheduleFromCourseEntries(rawCourses, options = {}) {
   const courses = normalizeCourseEntries(rawCourses)
   if (courses.length === 0) {
+    const total = Array.isArray(rawCourses) ? rawCourses.length : 0
+    if (total > 0) {
+      throw new Error(`课程表里有 ${total} 门课，但没有一门能解析出时间或星期，请检查课程表版本`)
+    }
     throw new Error("课程表中没有可导入的课程")
   }
 
@@ -280,7 +284,15 @@ export function detectScheduleFormat(data) {
 
   if (Array.isArray(data.courses) && data.courses.length > 0) {
     const firstCourse = data.courses[0] || {}
-    if ("customStartTime" in firstCourse || "customEndTime" in firstCourse || "position" in firstCourse || data.config?.semesterStartDate || Array.isArray(data.timeSlots)) {
+    if (
+      "customStartTime" in firstCourse
+      || "customEndTime" in firstCourse
+      || "startSection" in firstCourse
+      || "endSection" in firstCourse
+      || "position" in firstCourse
+      || data.config?.semesterStartDate
+      || Array.isArray(data.timeSlots)
+    ) {
       return "shiguang"
     }
 
@@ -288,6 +300,51 @@ export function detectScheduleFormat(data) {
       return "native"
     }
   }
+
+  return null
+}
+
+/** 拾光 App 的时间表：节次号 → 起止时间 */
+function buildTimeSlotMap(timeSlots) {
+  const slotMap = new Map()
+  if (!Array.isArray(timeSlots)) return slotMap
+
+  for (const slot of timeSlots) {
+    if (!slot || typeof slot !== "object") continue
+    const number = Number(slot.number ?? slot.section ?? slot.node)
+    if (!Number.isInteger(number) || number <= 0) continue
+    const startTime = normalizeTimeString(slot.startTime)
+    const endTime = normalizeTimeString(slot.endTime)
+    if (!startTime || !endTime) continue
+    slotMap.set(number, { startTime, endTime })
+  }
+
+  return slotMap
+}
+
+/**
+ * 拾光 App 导出的课程靠**节次**表示时间（startSection/endSection），
+ * customStartTime/customEndTime 在 isCustomTime 为 false 时是 null，
+ * 必须回 timeSlots 里查——上游只读 customStartTime，所以这类文件一门课都解析不出来。
+ */
+function resolveShiguangCourseTime(course, slotMap) {
+  const customStart = normalizeTimeString(course.customStartTime)
+  const customEnd = normalizeTimeString(course.customEndTime)
+  if (customStart && customEnd) return { startTime: customStart, endTime: customEnd }
+
+  const rawStart = Number(course.startSection ?? course.startNode ?? course.section)
+  const startSection = Number.isInteger(rawStart) ? rawStart : null
+  if (startSection) {
+    const rawEnd = Number(course.endSection ?? course.endNode)
+    const endSection = Number.isInteger(rawEnd) ? rawEnd : startSection
+    const startSlot = slotMap.get(startSection)
+    const endSlot = slotMap.get(endSection) || startSlot
+    if (startSlot && endSlot) return { startTime: startSlot.startTime, endTime: endSlot.endTime }
+  }
+
+  const plainStart = normalizeTimeString(course.startTime)
+  const plainEnd = normalizeTimeString(course.endTime)
+  if (plainStart && plainEnd) return { startTime: plainStart, endTime: plainEnd }
 
   return null
 }
@@ -304,15 +361,19 @@ export function convertNativeToInternal(data) {
 }
 
 export function convertShiguangToInternal(data) {
-  const courses = (data.courses || []).map((course) => ({
-    name: course.name,
-    teacher: course.teacher,
-    location: course.position,
-    day: course.day,
-    weeks: course.weeks,
-    startTime: course.customStartTime || course.startTime,
-    endTime: course.customEndTime || course.endTime
-  }))
+  const slotMap = buildTimeSlotMap(data.timeSlots)
+  const courses = (data.courses || []).map((course) => {
+    const time = resolveShiguangCourseTime(course, slotMap)
+    return {
+      name: course.name,
+      teacher: course.teacher,
+      location: course.position,
+      day: course.day,
+      weeks: course.weeks,
+      startTime: time?.startTime,
+      endTime: time?.endTime
+    }
+  })
 
   return buildInternalScheduleFromCourseEntries(courses, {
     semesterStart: data.config?.semesterStartDate,
