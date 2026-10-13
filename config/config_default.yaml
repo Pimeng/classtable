@@ -9,6 +9,9 @@ APITOKEN: 不告诉你喵
 # 是否开启 @ 提醒功能
 AT_REMIND: false
 
+# 是否把 @ 提醒的判定过程写进日志（排查不同适配器的 @ 形态时打开）
+AT_REMIND_DEBUG: false
+
 # Bot 名字，如果不填则使用 Bot 的 QQ 名字
 BOT_NAME: Yunzai
 

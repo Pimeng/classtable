@@ -18,6 +18,12 @@ import {
   normalizeScheduleData,
   calculateWeekByStartDate as calcWeekByStartDate
 } from "./scheduleStorage.js"
+import {
+  getGroupMemberMap,
+  resolveMember,
+  resolveAvatarUrl,
+  resolveUserName
+} from "./identity.js"
 
 // 内部函数 Start
 
@@ -46,18 +52,19 @@ function getAllUsersWithScheduleFromFiles() {
  * 自动同步群成员与课表用户，维护群组用户列表
  * @param {string} groupId - 群号
  * @param {Object} memberInfo - e.bot.gml.get(e.group_id) 返回的成员 Map
+ * @param {Object} e - 消息事件对象，用于兼容不同适配器的 id 形态
  * @returns {Array} 有课表数据的群成员 QQ 号数组
  */
-async function syncGroupUserListWithMembers(groupId, memberInfo) {
-  return syncGroupUsersFromStorage(groupId, memberInfo)
+async function syncGroupUserListWithMembers(groupId, memberInfo, e = null) {
+  return syncGroupUsersFromStorage(groupId, memberInfo, e)
 }
 
 // 兼容原有接口，自动同步群成员与课表用户
-async function getAllUsersWithSchedule(groupId, memberInfo = null) {
+async function getAllUsersWithSchedule(groupId, memberInfo = null, e = null) {
   try {
     // 如果传入了memberInfo，则自动同步
     if (memberInfo) {
-      return await syncGroupUserListWithMembers(groupId, memberInfo)
+      return await syncGroupUserListWithMembers(groupId, memberInfo, e)
     }
     return readGroupUserIdsFromStorage(groupId)
   } catch (error) {
@@ -81,8 +88,10 @@ async function getMultipleNextClassRenderData(e, limit = null) {
   try {
     const groupId = e.group_id
     // 自动同步群成员与课表用户
-    const memberInfo = e.bot.gml.get(e.group_id)
-    const userIds = await getAllUsersWithSchedule(groupId, memberInfo)
+    // 注意：官方 bot 适配器下 gml 的 group key 带实例前缀，且可能整个 gml 不存在，
+    // 交给 identity.js 统一探测；取不到时回退到本地群成员列表，不影响渲染
+    const memberInfo = getGroupMemberMap(e)
+    const userIds = await getAllUsersWithSchedule(groupId, memberInfo, e)
     
     // 如果没有用户有课表数据
     if (!userIds || userIds.length === 0) {
@@ -117,16 +126,17 @@ async function getMultipleNextClassRenderData(e, limit = null) {
     // 使用Promise.all并行处理用户数据
     const userPromises = userIds.map(async (userId) => {
       let userName = "未知用户"
-      let avatarUrl = `https://q2.qlogo.cn/g?b=qq&nk=${userId}&s=100`
+      let avatarUrl = ""
       try {
-        const memberInfo = e.bot.gml.get(e.group_id)
-        const member = memberInfo.get(Number(userId))
-        userName = member?.card || member?.nickname || `用户${userId}`
-        if (member && member.avatar) {
-          avatarUrl = member.avatar
-        }
+        // 昵称 / 头像交给兼容层：
+        //   ICQQ  -> member.card || member.nickname + q1.qlogo.cn 的 QQ 号头像
+        //   官方bot -> member.user_name + q.qlogo.cn/qqapp/{appid}/{openid} 头像
+        const member = resolveMember(e, userId)
+        userName = resolveUserName(e, userId, { member })
+        avatarUrl = resolveAvatarUrl(e, userId, member, 100)
       } catch (err) {
         userName = `用户${userId}`
+        avatarUrl = resolveAvatarUrl(e, userId, null, 100)
       }
       
       try {
@@ -221,8 +231,9 @@ async function getAllUsersNextClassRenderData(e, limit = null) {
     
     // 使用Promise.all并行处理用户数据
     const userPromises = userIds.map(async (userId) => {
-      let userName = `id${userId}`
-      let avatarUrl = `https://q1.qlogo.cn/g?b=qq&nk=${userId}&s=100`
+      const member = resolveMember(e, userId)
+      const userName = resolveUserName(e, userId, { member, fallback: `id${userId}` })
+      const avatarUrl = resolveAvatarUrl(e, userId, member, 100)
       
       try {
         return await buildUserNextClassCard({
