@@ -1,6 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { userScheduleCache, getUserScheduleCacheKey } from "./cache.js"
+import { userIdCandidates } from "./identity.js"
 
 export const DATA_DIR = path.join("./plugins", "classtable", "data")
 export const USER_DATA_DIR = path.join(DATA_DIR, "users")
@@ -36,6 +37,25 @@ export function writeJsonFile(filePath, data) {
 
 export function hasUserSchedule(userId) {
   return fs.existsSync(getUserSchedulePath(userId))
+}
+
+/**
+ * 按候选 id 找出真正落盘的那一份课表
+ *
+ * 同一个人在不同适配器/不同版本下会写成不同形式的 id（裸 openid 与
+ * `{self_id}:{openid}` 都出现过），调用方传入 candidates（见 identity.js 的
+ * userIdCandidates）后，这里返回**实际存在文件**的那个 id，供后续读取复用。
+ *
+ * @param {string} userId 运行时 id，优先尝试
+ * @param {Array<string>} candidates 其它可能的写法
+ * @returns {string|null}
+ */
+export function resolveStoredUserId(userId, candidates = []) {
+  const ids = [userId, ...candidates].map((id) => String(id ?? "").trim()).filter(Boolean)
+  for (const id of [...new Set(ids)]) {
+    if (hasUserSchedule(id)) return id
+  }
+  return null
 }
 
 export function normalizeScheduleData(scheduleData) {
@@ -125,10 +145,16 @@ export function getGroupUserIds(groupId) {
   }
 }
 
-export function syncGroupUserListWithMembers(groupId, memberInfo) {
+export function syncGroupUserListWithMembers(groupId, memberInfo, e = null) {
   try {
     const memberIds = Array.from(memberInfo.keys()).map(String)
-    const validUserIds = memberIds.filter((userId) => hasUserSchedule(userId))
+    // 成员缓存里的 id 形态不一定和历史课表文件名一致（裸 openid vs 带实例前缀），
+    // 命中哪一种就按哪一种落盘，避免同一个人的课表从群列表里凭空消失
+    const validUserIds = [...new Set(
+      memberIds
+        .map((userId) => resolveStoredUserId(userId, userIdCandidates(e, userId)))
+        .filter(Boolean)
+    )]
     writeJsonFile(getGroupUserListPath(groupId), validUserIds)
     return validUserIds
   } catch (error) {
